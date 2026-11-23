@@ -1,0 +1,15 @@
+{{- if .Values.gateway.enabled }}
+# Same reason as the API's budget: a drain of two nodes must take the gateway
+# pods one at a time, each after its replacement is Ready.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "proxy-api.gatewayLabels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "proxy-api.gatewaySelectorLabels" . | nindent 6 }}
+{{- end }}

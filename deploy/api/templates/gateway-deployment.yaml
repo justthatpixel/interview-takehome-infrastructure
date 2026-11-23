@@ -1,0 +1,81 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  labels:
+    {{- include "proxy-api.gatewayLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  selector:
+    matchLabels:
+      {{- include "proxy-api.gatewaySelectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Same as the API: never lose capacity during a deploy.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "proxy-api.gatewayLabels" . | nindent 8 }}
+      annotations:
+        # Envoy reads its config only at start, so roll the pods when it changes.
+        checksum/config: {{ include (print $.Template.BasePath "/gateway-configmap.yaml") . | sha256sum }}
+        # Retry and upstream metrics, for dashboards and alerts.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9901"
+        prometheus.io/path: /stats/prometheus
+    spec:
+      # Covers the preStop sleep, plus a buffer for Envoy to exit.
+      terminationGracePeriodSeconds: {{ add .Values.gateway.preStopSleepSeconds 10 }}
+      # One pod per zone, as for the API. See deployment.yaml.
+      topologySpreadConstraints:
+        - topologyKey: topology.kubernetes.io/zone
+          maxSkew: 1
+          whenUnsatisfiable: DoNotSchedule
+          nodeTaintsPolicy: Honor
+          labelSelector:
+            matchLabels:
+              {{- include "proxy-api.gatewaySelectorLabels" . | nindent 14 }}
+      containers:
+        - name: envoy
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          # Two worker threads. By default Envoy starts one per CPU it sees
+          # (12 here), which costs memory and buys nothing at this load.
+          args: ["-c", "/etc/envoy/envoy.yaml", "--concurrency", "2"]
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: admin
+              containerPort: 9901
+          lifecycle:
+            # Envoy exits at once on SIGTERM. Keep it serving until Traefik
+            # has dropped the pod and the requests it already has are done.
+            preStop:
+              sleep:
+                seconds: {{ .Values.gateway.preStopSleepSeconds }}
+          # /ready answers 200 once Envoy has loaded its config and is serving.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            periodSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/envoy
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-gateway
+{{- end }}

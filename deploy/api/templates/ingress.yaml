@@ -20,6 +20,7 @@ spec:
             pathType: Exact
             backend:
               service:
-                name: {{ .Release.Name }}
+                # Through the Envoy gateway when it is on, else straight to the API.
+                name: {{ .Release.Name }}{{ if .Values.gateway.enabled }}-gateway{{ end }}
                 port:
                   name: http
