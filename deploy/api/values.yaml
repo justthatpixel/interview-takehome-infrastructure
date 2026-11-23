@@ -6,24 +6,25 @@ image:
   tag: dev
 
 autoscaling:
-  # Two per zone. At the 14 req/s baseline about 22 requests are in flight,
-  # which the target below already turns into 5 pods. With 3, a pod killed
-  # before the autoscaler caught up left 2 pods holding ~32 requests plus the
-  # gateway's retries, and one hit the 20 limit (503 x 4 in level 4). With 6,
-  # losing a pod or a whole zone still leaves 4.
-  minReplicas: 6
-  # Enough for 60 req/s (about 96 in flight) at the target below. Each pod's
-  # DB pool can open up to max(4, CPUs) connections (12 on these nodes), and
-  # Postgres allows 100 for both environments. The API holds a connection
-  # only for one short query, so a pod really uses one or two, but the cap
-  # keeps the worst case bounded.
+  # One more pod than the baseline needs. At 14 req/s about 22 requests are
+  # in flight, which the target below turns into 3 pods. With only 3, a
+  # killed pod left 2 holding the load plus the gateway's retries, and one hit
+  # the 20 limit (503 x 4 in level 4). 4, 5 and 6 all passed level 4; 4 is
+  # the cheapest.
+  minReplicas: 4
+  # Level 3 (60 req/s, about 96 in flight) peaks at 12 pods with the target
+  # below, so 20 leaves headroom. Each pod's DB pool can open up to
+  # max(4, CPUs) connections (12 on these nodes), and Postgres allows 100
+  # for both environments. The API holds a connection only for one short
+  # query, so a pod really uses one or two, but the cap bounds the worst case.
   maxReplicas: 20
   # Average requests in flight per pod to aim for. A pod refuses the 21st
-  # (503). A scale-up takes 20-30 s to land (scrape, HPA sync, pod start),
-  # and new pods get less traffic at first, so the busiest pod runs well
-  # above the average. At 8, a 60 s ramp pushed a pod to 20 while the
-  # average was 12. 5 leaves room for both.
-  targetInFlight: 5
+  # (503), and a scale-up takes 20-30 s to land (scrape, HPA sync, pod start),
+  # so the target must leave room for load to grow meanwhile. Envoy sends
+  # each request to the pod with the fewest in flight, so pods stay close to
+  # the average. Level 3: 6 passed (peak 17 pods), 8 passed (peak 12),
+  # 10 failed (503 x 1).
+  targetInFlight: 8
   # Where KEDA reads the metric. Installed by local/setup.sh.
   prometheusAddress: http://prometheus-server.monitoring.svc
 
