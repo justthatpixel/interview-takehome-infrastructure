@@ -1,0 +1,17 @@
+# A node drain evicts pods through this budget. Without it, draining two nodes
+# at once evicted two of three pods together, and the one left could not take
+# the load (503). With it, the drain evicts one pod, waits until its
+# replacement is Ready elsewhere, then evicts the next.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "proxy-api.labels" . | nindent 4 }}
+spec:
+  # maxUnavailable, not minAvailable, so it stays correct when the replica
+  # count changes.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "proxy-api.selectorLabels" . | nindent 6 }}

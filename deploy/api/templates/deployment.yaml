@@ -27,6 +27,19 @@ spec:
       # Must cover the preStop sleep plus the API's drain, or the kubelet
       # SIGKILLs requests still in flight. 10 s extra as a buffer.
       terminationGracePeriodSeconds: {{ add .Values.api.preStopSleepSeconds .Values.api.shutdownTimeoutSeconds 10 }}
+      # One pod per zone where possible, so losing a node or a zone takes
+      # out as few pods as possible.
+      topologySpreadConstraints:
+        - topologyKey: topology.kubernetes.io/zone
+          maxSkew: 1
+          whenUnsatisfiable: DoNotSchedule
+          # Leave cordoned (draining) nodes out of the count. Otherwise their
+          # zones still count as empty, and the replacement pods for a drain
+          # stay Pending because placing them would break maxSkew.
+          nodeTaintsPolicy: Honor
+          labelSelector:
+            matchLabels:
+              {{- include "proxy-api.selectorLabels" . | nindent 14 }}
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
