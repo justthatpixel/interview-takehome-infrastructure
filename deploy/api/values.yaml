@@ -8,19 +8,29 @@ image:
 autoscaling:
   # One pod per zone, so losing a pod or a zone still leaves two serving.
   minReplicas: 3
-  # Each pod's DB pool can open up to max(4, CPUs) connections (12 on these
-  # nodes), and Postgres allows 100 for both environments. The API holds a
-  # connection only for one short query, so real use is far below the
-  # worst case, but this keeps the count bounded.
-  maxReplicas: 15
+  # Enough for 60 req/s (about 96 in flight) at the target below. Each pod's
+  # DB pool can open up to max(4, CPUs) connections (12 on these nodes), and
+  # Postgres allows 100 for both environments. The API holds a connection
+  # only for one short query, so a pod really uses one or two, but the cap
+  # keeps the worst case bounded.
+  maxReplicas: 20
   # Average requests in flight per pod to aim for. A pod refuses the 21st
-  # (503), and a new pod takes a few seconds to start, so aim well below 20.
-  targetInFlight: 8
+  # (503). A scale-up takes 20-30 s to land (scrape, HPA sync, pod start),
+  # and new pods get less traffic at first, so the busiest pod runs well
+  # above the average. At 8, a 60 s ramp pushed a pod to 20 while the
+  # average was 12. 5 leaves room for both.
+  targetInFlight: 5
   # Where KEDA reads the metric. Installed by local/setup.sh.
   prometheusAddress: http://prometheus-server.monitoring.svc
 
 ingress:
   host: development.localhost
+  # Retry requests that reached a pod which had just died. See
+  # templates/middleware.yaml.
+  retry:
+    enabled: true
+    attempts: 3
+    initialInterval: 50ms
 
 api:
   logLevel: info

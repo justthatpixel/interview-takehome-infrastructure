@@ -1,0 +1,22 @@
+{{- if .Values.ingress.retry.enabled }}
+# A killed container (SIGKILL, OOM, crash) gets no preStop and no drain.
+# Traefik keeps sending it requests for a moment, until Kubernetes marks the
+# pod not ready, and those get "connection refused" (502). This resends such
+# a request to another pod.
+#
+# It only retries when the backend sent no response at all. It never retries
+# on an HTTP status, so a 503 from a full pod is passed through, not
+# repeated. /proxy is a GET, so a resend is safe.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-retry
+  labels:
+    {{- include "proxy-api.labels" . | nindent 4 }}
+spec:
+  retry:
+    # Few attempts, so a broken backend cannot turn every request into a
+    # burst of retries under load.
+    attempts: {{ .Values.ingress.retry.attempts }}
+    initialInterval: {{ .Values.ingress.retry.initialInterval }}
+{{- end }}

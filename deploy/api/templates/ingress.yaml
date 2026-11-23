@@ -4,6 +4,11 @@ metadata:
   name: {{ .Release.Name }}
   labels:
     {{- include "proxy-api.labels" . | nindent 4 }}
+  {{- if .Values.ingress.retry.enabled }}
+  annotations:
+    # Traefik names CRD middlewares <namespace>-<name>@kubernetescrd.
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ .Release.Name }}-retry@kubernetescrd
+  {{- end }}
 spec:
   ingressClassName: traefik
   rules:
