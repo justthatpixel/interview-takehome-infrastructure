@@ -25,7 +25,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/gateway-configmap.yaml") . | sha256sum }}
         # Retry and upstream metrics, for dashboards and alerts.
         prometheus.io/scrape: "true"
-        prometheus.io/port: "9901"
+        prometheus.io/port: "9902"
         prometheus.io/path: /stats/prometheus
     spec:
       # Covers the preStop sleep, plus a buffer for Envoy to exit.
@@ -48,24 +48,24 @@ spec:
           ports:
             - name: http
               containerPort: 8080
-            - name: admin
-              containerPort: 9901
+            - name: ops
+              containerPort: 9902
           lifecycle:
             # Envoy exits at once on SIGTERM. Keep it serving until Traefik
             # has dropped the pod and the requests it already has are done.
             preStop:
               sleep:
                 seconds: {{ .Values.gateway.preStopSleepSeconds }}
-          # /ready answers 200 once Envoy has loaded its config and is serving.
+          # /healthz is answered by the health_check filter on the ops listener.
           readinessProbe:
             httpGet:
-              path: /ready
-              port: admin
+              path: /healthz
+              port: ops
             periodSeconds: 2
           livenessProbe:
             httpGet:
-              path: /ready
-              port: admin
+              path: /healthz
+              port: ops
             periodSeconds: 10
             failureThreshold: 3
           resources:

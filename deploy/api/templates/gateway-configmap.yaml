@@ -7,13 +7,46 @@ metadata:
     {{- include "proxy-api.gatewayLabels" . | nindent 4 }}
 data:
   envoy.yaml: |
-    # Probes (/ready) and Prometheus (/stats/prometheus) use this port. It is
-    # reachable inside the cluster only: Traefik routes to 8080, never here.
+    # The admin API can change Envoy at runtime and shut it down
+    # (/quitquitquit), so only processes in this pod can reach it. The "ops"
+    # listener below exposes the two things the cluster needs from outside.
     admin:
-      address: { socket_address: { address: 0.0.0.0, port_value: 9901 } }
+      address: { socket_address: { address: 127.0.0.1, port_value: 9901 } }
 
     static_resources:
       listeners:
+        # Port 9902: the kubelet's probes and Prometheus's scrape. Anything
+        # else gets 404.
+        - name: ops
+          address: { socket_address: { address: 0.0.0.0, port_value: 9902 } }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: ops
+                    route_config:
+                      virtual_hosts:
+                        - name: ops
+                          domains: ["*"]
+                          routes:
+                            - match: { path: /stats/prometheus }
+                              route: { cluster: admin }
+                            - match: { prefix: / }
+                              direct_response: { status: 404 }
+                    http_filters:
+                      # Answers /healthz itself: 200 while Envoy runs and is
+                      # not draining. The probes use it.
+                      - name: envoy.filters.http.health_check
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.health_check.v3.HealthCheck
+                          pass_through_mode: false
+                          headers:
+                            - name: ":path"
+                              string_match: { exact: /healthz }
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
         - name: http
           address: { socket_address: { address: 0.0.0.0, port_value: 8080 } }
           filter_chains:
@@ -63,6 +96,17 @@ data:
                           "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
       clusters:
+        # The admin API on localhost, for the ops listener's metrics route.
+        - name: admin
+          type: STATIC
+          connect_timeout: 1s
+          load_assignment:
+            cluster_name: admin
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9901 }
         - name: proxy_api
           # Resolves the headless Service, which returns one address per
           # Ready API pod. Re-resolved every second, so new pods get traffic
