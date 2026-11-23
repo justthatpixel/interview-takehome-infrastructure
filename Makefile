@@ -8,11 +8,11 @@ ENV     ?= production
 CHART   ?= deploy/api
 # Your values files for ENV, comma-separated and in order. Empty uses only the
 # chart's values.yaml.
-VALUES  ?=
+VALUES  ?= $(CHART)/$(ENV).yaml
 OS      := $(shell uname -s | tr A-Z a-z)
 ARCH    := $(subst aarch64,arm64,$(subst x86_64,amd64,$(shell uname -m)))
 
-.PHONY: cluster image check down
+.PHONY: cluster setup image check down
 
 # Create the k3d cluster and its registry, with Traefik on localhost:$(TRAEFIK_PORT).
 # Then run Postgres in the db namespace with Terraform, seeded from the API's
@@ -21,6 +21,11 @@ cluster:
 	k3d cluster create --config local/k3d.yaml --port "$(TRAEFIK_PORT):80@loadbalancer" --wait
 	terraform -chdir=local/terraform init -input=false
 	terraform -chdir=local/terraform apply -input=false -auto-approve -var kube_context=$(CONTEXT)
+
+# Prepare the cluster for the chart (DB password Secrets in the app
+# namespaces). Run once after `make cluster`.
+setup:
+	CONTEXT=$(CONTEXT) local/setup.sh
 
 # Build the API image and push it to the local registry. Set TAG for each new version.
 image:

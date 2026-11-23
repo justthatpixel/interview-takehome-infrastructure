@@ -1,0 +1,23 @@
+# The API exits without this file. Mounted at /root/configs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "proxy-api.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    api:
+      addr: ""
+      port: 8080
+      healthCheckPort: 9090
+      logLevel: {{ .Values.api.logLevel }}
+      shutdownTimeout: {{ .Values.api.shutdownTimeoutSeconds }}s
+    postgres:
+      host: {{ .Values.postgres.host }}
+      port: {{ .Values.postgres.port }}
+      user: {{ .Values.postgres.user }}
+      database: {{ .Values.postgres.database }}
+      sslMode: disable
+      # The Secret volume in deployment.yaml.
+      passwordFile: /etc/proxy-api/db/password

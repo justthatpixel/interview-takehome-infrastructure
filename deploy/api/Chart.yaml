@@ -1,0 +1,5 @@
+apiVersion: v2
+name: proxy-api
+description: The Byteful proxy API, deployed so that no request fails during rollouts, pod moves and load changes.
+type: application
+version: 0.1.0

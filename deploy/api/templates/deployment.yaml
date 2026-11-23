@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "proxy-api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "proxy-api.selectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never take an old pod away before its replacement is Ready, so
+      # capacity never drops during a deploy.
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        {{- include "proxy-api.labels" . | nindent 8 }}
+      annotations:
+        # The API reads its config only at start, so roll the pods when it changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      # Must cover the preStop sleep plus the API's drain, or the kubelet
+      # SIGKILLs requests still in flight. 10 s extra as a buffer.
+      terminationGracePeriodSeconds: {{ add .Values.api.preStopSleepSeconds .Values.api.shutdownTimeoutSeconds 10 }}
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: health
+              containerPort: 9090
+          lifecycle:
+            # The API closes port 8080 as soon as it gets SIGTERM. Traefik
+            # learns that the pod is going away a moment after Kubernetes
+            # does, and until then it still sends requests here. Waiting
+            # before SIGTERM keeps the port open until Traefik has stopped.
+            preStop:
+              sleep:
+                seconds: {{ .Values.api.preStopSleepSeconds }}
+          # /db answers only once Postgres has answered and 8080 is open.
+          # The API retries Postgres every second, so allow it 60 s.
+          startupProbe:
+            httpGet:
+              path: /db
+              port: health
+            periodSeconds: 2
+            failureThreshold: 30
+          # Takes the pod out of the Service when the API stops taking requests.
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: health
+            periodSeconds: 2
+            failureThreshold: 1
+          # Only "is the process alive". It must not check Postgres, or a DB
+          # outage would restart every pod at once.
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: health
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /root/configs
+              readOnly: true
+            - name: db-password
+              mountPath: /etc/proxy-api/db
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}
+        - name: db-password
+          secret:
+            secretName: {{ .Values.postgres.passwordSecret }}

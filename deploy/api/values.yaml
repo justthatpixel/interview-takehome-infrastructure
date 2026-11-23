@@ -1,0 +1,40 @@
+# Shared defaults. development.yaml and production.yaml set what differs per
+# namespace.
+
+image:
+  repository: localhost:5001/proxy-api
+  tag: dev
+
+# One pod per zone, so losing a pod or a zone still leaves two serving.
+replicas: 3
+
+ingress:
+  host: development.localhost
+
+api:
+  logLevel: info
+  # How long the API drains in-flight requests after SIGTERM. A request takes
+  # at most 3 s, so 10 s is plenty.
+  shutdownTimeoutSeconds: 10
+  # How long the pod keeps serving after Kubernetes starts to stop it, before
+  # the API gets SIGTERM. Traefik must drop the pod from its backends in this
+  # time, or it sends requests to a closed port (502).
+  preStopSleepSeconds: 10
+
+postgres:
+  host: postgres.db.svc.cluster.local
+  port: 5432
+  user: api_development
+  database: ping_residential
+  # Secret in the release namespace with the DB password in key "password".
+  # local/setup.sh copies it from the db namespace.
+  passwordSecret: postgres-password
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  # Memory limit to stop a leak from hurting the node. No CPU limit: throttling
+  # would only add latency, and the API's work is mostly waiting.
+  limits:
+    memory: 128Mi

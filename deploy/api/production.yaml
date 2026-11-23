@@ -1,0 +1,5 @@
+ingress:
+  host: production.localhost
+
+postgres:
+  user: api_production
