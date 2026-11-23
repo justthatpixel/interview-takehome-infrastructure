@@ -1,0 +1,41 @@
+# Scales on requests in flight, not CPU: a request is mostly a sleep and a DB
+# read, so CPU stays near zero while pods hit their 20-request limit. KEDA
+# creates and drives an HPA from this.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "proxy-api.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ .Release.Name }}
+  minReplicaCount: {{ .Values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas }}
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.autoscaling.prometheusAddress }}
+        # Total in flight across the release's pods. With the default
+        # AverageValue metric type, the HPA divides this by the pod count and
+        # compares it with the threshold.
+        query: sum(http_requests_in_flight{namespace="{{ .Release.Namespace }}", app_kubernetes_io_name="proxy-api"})
+        threshold: {{ .Values.autoscaling.targetInFlight | quote }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        # Up fast: under-capacity means 503s within seconds.
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+        # Down slowly, a couple of pods at a time: load is bursty, and every
+        # removal is a pod shutdown that must drain cleanly.
+        scaleDown:
+          stabilizationWindowSeconds: 60
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30

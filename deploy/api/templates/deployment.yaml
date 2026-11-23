@@ -5,7 +5,8 @@ metadata:
   labels:
     {{- include "proxy-api.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicas }}
+  # No replicas field: the autoscaler owns the count. If it were set, every
+  # deploy would reset the count to that number in the middle of a load peak.
   selector:
     matchLabels:
       {{- include "proxy-api.selectorLabels" . | nindent 6 }}
@@ -23,6 +24,10 @@ spec:
       annotations:
         # The API reads its config only at start, so roll the pods when it changes.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        # Prometheus scrapes http_requests_in_flight here for the autoscaler.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
     spec:
       # Must cover the preStop sleep plus the API's drain, or the kubelet
       # SIGKILLs requests still in flight. 10 s extra as a buffer.

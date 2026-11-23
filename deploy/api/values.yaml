@@ -5,8 +5,19 @@ image:
   repository: localhost:5001/proxy-api
   tag: dev
 
-# One pod per zone, so losing a pod or a zone still leaves two serving.
-replicas: 3
+autoscaling:
+  # One pod per zone, so losing a pod or a zone still leaves two serving.
+  minReplicas: 3
+  # Each pod's DB pool can open up to max(4, CPUs) connections (12 on these
+  # nodes), and Postgres allows 100 for both environments. The API holds a
+  # connection only for one short query, so real use is far below the
+  # worst case, but this keeps the count bounded.
+  maxReplicas: 15
+  # Average requests in flight per pod to aim for. A pod refuses the 21st
+  # (503), and a new pod takes a few seconds to start, so aim well below 20.
+  targetInFlight: 8
+  # Where KEDA reads the metric. Installed by local/setup.sh.
+  prometheusAddress: http://prometheus-server.monitoring.svc
 
 ingress:
   host: development.localhost

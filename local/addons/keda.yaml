@@ -1,0 +1,7 @@
+# On the control plane, so draining the workers does not stop autoscaling.
+nodeSelector:
+  node-role.kubernetes.io/control-plane: "true"
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule

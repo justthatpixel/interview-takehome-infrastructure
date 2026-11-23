@@ -1,0 +1,30 @@
+# Prometheus only to feed the autoscaler: scrapes pods that have
+# prometheus.io/* annotations (the chart's kubernetes-pods job).
+server:
+  global:
+    # The autoscaler can only react as fast as the data. The default 1m would
+    # leave pods at their 20-request limit before a scale-up starts.
+    scrape_interval: 5s
+    # Must not exceed the interval, or Prometheus refuses the config.
+    scrape_timeout: 4s
+  # Local cluster only. The data is not worth keeping across restarts.
+  persistentVolume:
+    enabled: false
+  retention: 1d
+  # On the control plane, so draining the workers does not stop autoscaling.
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+# Not needed to scale the API.
+alertmanager:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-node-exporter:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
