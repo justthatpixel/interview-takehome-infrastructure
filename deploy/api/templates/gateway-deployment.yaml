@@ -27,6 +27,9 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9902"
         prometheus.io/path: /stats/prometheus
+        # Only stats Envoy has actually updated. The full set is about 900
+        # series per pod, mostly for features this config does not use.
+        prometheus.io/param_usedonly: "true"
     spec:
       # Covers the preStop sleep, plus a buffer for Envoy to exit.
       terminationGracePeriodSeconds: {{ add .Values.gateway.preStopSleepSeconds 10 }}
