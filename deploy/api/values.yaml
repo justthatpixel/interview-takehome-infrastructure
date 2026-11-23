@@ -6,8 +6,12 @@ image:
   tag: dev
 
 autoscaling:
-  # One pod per zone, so losing a pod or a zone still leaves two serving.
-  minReplicas: 3
+  # Two per zone. At the 14 req/s baseline about 22 requests are in flight,
+  # which the target below already turns into 5 pods. With 3, a pod killed
+  # before the autoscaler caught up left 2 pods holding ~32 requests plus the
+  # gateway's retries, and one hit the 20 limit (503 x 4 in level 4). With 6,
+  # losing a pod or a whole zone still leaves 4.
+  minReplicas: 6
   # Enough for 60 req/s (about 96 in flight) at the target below. Each pod's
   # DB pool can open up to max(4, CPUs) connections (12 on these nodes), and
   # Postgres allows 100 for both environments. The API holds a connection
