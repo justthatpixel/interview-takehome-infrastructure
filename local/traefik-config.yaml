@@ -1,0 +1,11 @@
+# Runs Traefik on the server node, so a drain of the workers does not stop it.
+# The file name must differ from the k3s traefik.yaml, or k3s ignores it.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: "true"

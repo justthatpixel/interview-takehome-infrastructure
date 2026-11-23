@@ -1,0 +1,6 @@
+# The source of the check binaries in bin/ stays private.
+tools/check/
+
+# Local build of the API.
+services/api/api-server
+.DS_Store

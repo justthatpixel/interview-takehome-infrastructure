@@ -1,0 +1,45 @@
+# Local cluster for the take-home test. k3s installs Traefik by default.
+# The Makefile maps Traefik's port, so it can change without editing this file.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: takehome
+servers: 1
+agents: 3
+image: rancher/k3s:v1.31.5-k3s1
+registries:
+  # A local image registry, on localhost:5001 from the host
+  create:
+    name: takehome-registry
+    host: "0.0.0.0"
+    hostPort: "5001"
+  # The nodes pull localhost:5001 images from the registry container, so an
+  # image has the same name on the host and in the cluster.
+  config: |
+    mirrors:
+      "localhost:5001":
+        endpoint:
+          - http://takehome-registry:5000
+files:
+  - source: traefik-config.yaml
+    destination: k3s-manifests-custom/traefik-config.yaml
+    nodeFilters:
+      - server:*
+options:
+  k3s:
+    extraArgs:
+      # The server runs only the control plane, like a managed cluster.
+      - arg: --node-taint=node-role.kubernetes.io/control-plane:NoSchedule
+        nodeFilters:
+          - server:*
+    # Each agent is a worker in its own zone.
+    nodeLabels:
+      - label: topology.kubernetes.io/zone=ams-1
+        nodeFilters:
+          - agent:0
+      - label: topology.kubernetes.io/zone=par-1
+        nodeFilters:
+          - agent:1
+      - label: topology.kubernetes.io/zone=lon-1
+        nodeFilters:
+          - agent:2
