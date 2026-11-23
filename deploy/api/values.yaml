@@ -6,12 +6,12 @@ image:
   tag: dev
 
 autoscaling:
-  # One more pod than the baseline needs. At 14 req/s about 22 requests are
-  # in flight, which the target below turns into 3 pods. With only 3, a
-  # killed pod left 2 holding the load plus the gateway's retries, and one hit
-  # the 20 limit (503 x 4 in level 4). 4, 5 and 6 all passed level 4; 4 is
-  # the cheapest.
-  minReplicas: 4
+  # Two per zone. Losing a pod or a whole zone still leaves 4. With 3, a
+  # killed pod left 2 holding the load plus the gateway's retries, and one
+  # hit the 20 limit (503 x 4 in level 4). 4 passed level 4 but failed
+  # level 3 on a fresh cluster (503 x 1 and x 4): the load ramp starts from
+  # this count, and from 4 the autoscaler fell behind.
+  minReplicas: 6
   # Level 3 (60 req/s, about 96 in flight) peaks at 12 pods with the target
   # below, so 20 leaves headroom. Each pod's DB pool can open up to
   # max(4, CPUs) connections (12 on these nodes), and Postgres allows 100
