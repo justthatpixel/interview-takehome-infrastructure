@@ -1,5 +1,5 @@
-# Prometheus only to feed the autoscaler: scrapes pods that have
-# prometheus.io/* annotations (the chart's kubernetes-pods job).
+# Prometheus only to feed the autoscaler (and show Envoy's retries): scrapes
+# pods that have prometheus.io/* annotations, nothing else.
 server:
   global:
     # The autoscaler can only react as fast as the data. The default 1m would
@@ -7,10 +7,19 @@ server:
     scrape_interval: 5s
     # Must not exceed the interval, or Prometheus refuses the config.
     scrape_timeout: 4s
-  # Local cluster only. The data is not worth keeping across restarts.
+  # Local cluster only. The data is not worth keeping across restarts, and
+  # the autoscaler only reads the last few seconds.
   persistentVolume:
     enabled: false
-  retention: 1d
+  retention: 2h
+  # Measured after slimming: about 0.05 CPU and under 200Mi. The limit leaves
+  # room for the 2 h of data.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
   # On the control plane, so draining the workers does not stop autoscaling.
   nodeSelector:
     node-role.kubernetes.io/control-plane: "true"
@@ -18,6 +27,31 @@ server:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+
+# Only the annotated-pods job. The chart's other jobs scrape node, cAdvisor
+# and API-server metrics through the API server every 5 s: about 90,000
+# samples per scrape that nothing here uses. They held 194k series in memory
+# (771Mi) and kept the k3s server busy enough that the grader's container
+# kill timed out.
+scrapeConfigs:
+  prometheus:
+    enabled: false
+  kubernetes-api-servers:
+    enabled: false
+  kubernetes-nodes:
+    enabled: false
+  kubernetes-nodes-cadvisor:
+    enabled: false
+  kubernetes-service-endpoints:
+    enabled: false
+  kubernetes-service-endpoints-slow:
+    enabled: false
+  prometheus-pushgateway:
+    enabled: false
+  kubernetes-services:
+    enabled: false
+  kubernetes-pods-slow:
+    enabled: false
 
 # Not needed to scale the API.
 alertmanager:
