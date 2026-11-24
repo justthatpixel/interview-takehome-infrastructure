@@ -167,35 +167,17 @@ pods, their services, config and PDB were removed. A stricter test counted
 all requests during crashes: replay disabled produced seven 502s out of 50;
 replay enabled produced zero failures out of 150 across three kills.
 
-## Limits and production changes
+## What I'd do differently in production
 
-- **Verification:** one full Buffering run per environment on the existing
-  cluster, plus a baseline crash run and stricter replay tests. No fresh-cluster
-  comparison or long soak yet. An older Envoy run's 37 unexpected 503s remain
-  unexplained; later passes do not establish their cause.
-- **Buffering:** requests and responses may use memory or disk, and retries
-  increase latency. Set body-size and timeout bounds for production payloads.
-  Revisit replay safety before adding any route that changes data.
-- **DB connections:** the app uses pgxpool defaults, up to 12 connections per
-  pod on these nodes. Forty API pods across both environments could request
-  480 connections, plus rollout overlap, against Postgres's 100. Short queries
-  kept observed use low, but production needs a configurable pool or PgBouncer.
-- **Autoscaling telemetry:** Prometheus failure prevents scale-up. Missing
-  series can be treated as zero by the scaler's default settings. Production
-  needs missing-data handling, a safe fallback and alerts.
-- **Scheduling:** spread applies when pods are scheduled; they do not rebalance
-  automatically after drained nodes return. Consider the descheduler.
-- **Sizing:** six API pods remain running per environment. CPU and memory
-  requests are small local estimates; size them from production traffic.
-- **Availability:** Traefik and Postgres are each single replicas in the supplied
-  cluster. Production needs replicated ingress and a highly available database.
-- **Operations:** deploy with Argo CD, use External Secrets Operator with
-  Scaleway Secret Manager, and alert on 5xx, latency, restarts and concurrency.
-- **Isolation and hardening:** allow API traffic only from Traefik, restrict
-  egress, move the image away from `/root` to run non-root, use a read-only root
-  filesystem, drop capabilities and pin images by digest.
-
-The original Envoy implementation and its verification exceeded the task's
-three-hour budget. The later Buffering comparison is recorded separately in
-`docs/results.md`; it showed that the existing ingress could handle replay without the extra
-runtime component.
+1. **Protect the database from too many connections.** Each API pod can open
+   up to 12 connections, and at full scale the pods could ask for far more
+   than Postgres allows (100). I'd put PgBouncer in front of Postgres so many
+   pods share a small, fixed number of connections.
+2. **Remove the single points of failure.** Here Traefik and Postgres each run
+   as one copy. If either goes down, every request fails, however many API
+   pods there are. I'd run several Traefik replicas and use a managed,
+   highly available database.
+3. **Stop copying secrets by hand.** Locally, a script copies the database
+   password into each namespace. In production I'd deploy with Argo CD and
+   have External Secrets pull the password from Scaleway Secret Manager, so
+   no one handles it directly.
