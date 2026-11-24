@@ -113,8 +113,6 @@ quarantines the supplied grader, remove that flag with
 
 ![Level 3: The load goes up](docs/images/level-3-load-spike.png)
 
-The image shows one extra pod per zone for simplicity. The measured peak was 12-13 pods.
-
 - The grader raises the load from 14 to 60 req/s over 1 minute, holds 60 req/s for 1 minute, then drops back to 14 req/s over 30s. The number of pods must go up.
 - Each request takes 0.2–3s (about 1.6s on average), so 60 req/s means about 96 requests in flight. Each pod handles 20 at once, so we need at least 5 pods with zero headroom.
 - With a fixed pod count, pods go over 20 in flight and reject the rest (503).
