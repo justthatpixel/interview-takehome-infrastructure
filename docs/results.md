@@ -33,6 +33,23 @@ points to the whole cluster stalling rather than too few pods, possibly
 memory pressure in the 7.6 GiB Docker VM (it had 150-470 MiB free at times).
 Not proven.
 
+**Production rerun, Mac kept awake** (`caffeinate`, lid open), 3 full runs
+back to back on the same cluster, 2026-11-24 05:41-06:01:
+
+| Run | L1 | L2 | L3 | L4 |
+|---|---|---|---|---|
+| 1 | 0 of 578 | 0 of 2139 | 0 of 7007, peak 13 pods | 0 of 1266 |
+| 2 | 0 of 563 | 0 of 665 | 0 of 7008, peak 13 pods | 0 of 875 |
+| 3 | 0 of 563 | 0 of 664 | 0 of 7008, peak 13 pods | 0 of 532 |
+
+All passed. The Docker VM's available memory, logged every 5 s, never went
+below 1,586 MiB (load average up to 36 during image builds), so these runs
+show no memory pressure. The cause of the first production run 1 failure is
+still open; it did not repeat in 3 runs.
+
+Totals on the final chart since the fresh cluster: development 3 of 3,
+production 4 of 6 (one run lost to a closed lid, one unexplained).
+
 An earlier fresh-cluster attempt with minReplicas 4 (target 8) failed level 3
 on both environments (development 503 × 1, production 503 × 4); minReplicas
 went back to 6.
