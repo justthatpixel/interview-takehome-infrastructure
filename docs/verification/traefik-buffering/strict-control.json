@@ -1,0 +1,20 @@
+{
+  "namespace": "development",
+  "retryExpression": "IsNetworkError() && Attempts() < 1",
+  "rounds": [
+    {
+      "round": 1,
+      "pod": "proxy-api-7b5b6fc777-qhqx8",
+      "killTimeUTC": "2026-11-24T07:32:56.372925+00:00",
+      "inFlightBeforeKill": 9.0,
+      "requests": 50,
+      "failed": 7,
+      "statusCounts": {
+        "200": 43,
+        "502": 7
+      },
+      "maxResponseSeconds": 2.9136,
+      "meanResponseSeconds": 1.5015
+    }
+  ]
+}

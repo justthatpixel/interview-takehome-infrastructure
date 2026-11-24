@@ -1,0 +1,19 @@
+  [0:02] building and pushing the API image
+  [0:06] deploying your chart to development, not scored
+  [0:24] waiting for the pods to be ready
+  [0:49] sending 14 requests/s to http://development.localhost:8081/proxy
+
+level 4: pods crash
+  Kills an API container with no warning, 3 times, at 20 requests/s. A request that was already on the killed pod does not count. No other request may fail.
+  [0:54] killing proxy-api-956bd7896-58vvh on agent-2, 1 of 3
+  [0:56] waiting for the pods to be ready
+  [0:59] 65 requests, 0 failed, 20 requests/s, 6 of 6 pods ready
+  [1:03] killing proxy-api-956bd7896-prtjd on agent-1, 2 of 3
+  [1:04] 164 requests, 0 failed, 20 requests/s, 5 of 6 pods ready
+  [1:05] waiting for the pods to be ready
+  [1:09] 275 requests, 0 failed, 20 requests/s, 6 of 6 pods ready
+  [1:12] killing proxy-api-956bd7896-mmz5j on agent-0, 3 of 3
+  [1:14] 367 requests, 0 failed, 20 requests/s, 5 of 6 pods ready
+  [1:14] waiting for the pods to be ready
+  [1:19] 479 requests, 0 failed, 20 requests/s, 6 of 6 pods ready
+  PASS  0 of 534 failed

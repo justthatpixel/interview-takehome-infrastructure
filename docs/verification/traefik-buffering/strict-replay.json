@@ -1,0 +1,45 @@
+{
+  "namespace": "development",
+  "retryExpression": "IsNetworkError() && Attempts() < 3",
+  "rounds": [
+    {
+      "round": 1,
+      "pod": "proxy-api-7b5b6fc777-97b22",
+      "killTimeUTC": "2026-11-24T07:33:13.448785+00:00",
+      "inFlightBeforeKill": 9.0,
+      "requests": 50,
+      "failed": 0,
+      "statusCounts": {
+        "200": 50
+      },
+      "maxResponseSeconds": 3.7294,
+      "meanResponseSeconds": 1.8029
+    },
+    {
+      "round": 2,
+      "pod": "proxy-api-7b5b6fc777-4m8pl",
+      "killTimeUTC": "2026-11-24T07:33:18.219758+00:00",
+      "inFlightBeforeKill": 9.0,
+      "requests": 50,
+      "failed": 0,
+      "statusCounts": {
+        "200": 50
+      },
+      "maxResponseSeconds": 2.984,
+      "meanResponseSeconds": 1.4349
+    },
+    {
+      "round": 3,
+      "pod": "proxy-api-7b5b6fc777-97b22",
+      "killTimeUTC": "2026-11-24T07:33:23.593994+00:00",
+      "inFlightBeforeKill": 8.0,
+      "requests": 50,
+      "failed": 0,
+      "statusCounts": {
+        "200": 50
+      },
+      "maxResponseSeconds": 3.1935,
+      "meanResponseSeconds": 1.8086
+    }
+  ]
+}

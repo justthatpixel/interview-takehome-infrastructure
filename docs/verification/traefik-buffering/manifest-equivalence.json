@@ -1,0 +1,10 @@
+{
+  "development": {
+    "identical_to_tested_candidate": true,
+    "normalized_manifest_sha256": "49d1ded6fb88b48ad5febab98e1a5d8b36a8b0dbf212e70c775b5d749071460e"
+  },
+  "production": {
+    "identical_to_tested_candidate": true,
+    "normalized_manifest_sha256": "d6e7edf2ab5ef010324bb95b4f0b1388a8f0a398f13b5cd9b10762d8b1511cfc"
+  }
+}

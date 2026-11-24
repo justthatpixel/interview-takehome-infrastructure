@@ -3,7 +3,60 @@
 Real numbers from `make check` runs on the local k3d cluster (Docker Desktop,
 Apple Silicon). Newest first within each section.
 
-## Fresh cluster, current chart (target 8, minReplicas 4, slim Prometheus)
+## Traefik Buffering, current chart — 2026-11-24
+
+Tested against Traefik **2.11.18** on the existing k3d cluster, using source
+commit `726fae5bcdad9e52f9014d4a0b37f84e10869063` plus a copied chart with:
+
+- Envoy disabled and Traefik routing directly to the API Service.
+- Buffering `retryExpression: "IsNetworkError() && Attempts() < 3"`.
+- Unchanged `minReplicas: 6`, `maxReplicas: 20`, `targetInFlight: 8`.
+- Unchanged probes, 15 s preStop, 10 s shutdown timeout, PDB and zone spread.
+
+Each environment completed one full grader run. These are existing-cluster
+runs, not fresh-cluster or long-soak results. The final chart removes the
+unused Envoy templates and values; its rendered resources were checked
+against the tested candidate before adoption.
+
+| Environment | Level 1 | Level 2 | Level 3 | Level 4 | Peak API pods |
+|---|---|---|---|---|---|
+| development | 0 of 566 | 0 of 611 | 0 of 7006 | 0 of 523 | 12 |
+| production | 0 of 596 | 0 of 597 | 0 of 7006 | 0 of 530 | 13 |
+
+[Development log](verification/traefik-buffering/development.log),
+[production log](verification/traefik-buffering/production.log).
+A separate development level-4 run started at the six-pod minimum and passed
+with **0 of 534 failed** ([log](verification/traefik-buffering/baseline-kill.log)).
+The peak API counts match the earlier recorded Envoy runs, while removing
+three gateway pods per environment. This is a component-count comparison,
+not a controlled performance benchmark.
+
+### Interrupted requests: stricter than the grader
+
+The grader excludes requests already running on a killed container. A
+separate test sent 50 concurrent GET requests, measured the pods' in-flight
+metrics, then sent SIGKILL directly to a busy API container through the node's
+container runtime. It counted every client response, including interrupted
+requests. The victims had eight or nine active requests immediately before
+the kill.
+
+| Replay setting | Kills | Requests | Failed |
+|---|---|---|---|
+| Disabled (`Attempts() < 1`), negative control | 1 | 50 | 7 (all 502) |
+| Enabled (`Attempts() < 3`) | 3 | 150 | 0 |
+
+[Control results](verification/traefik-buffering/strict-control.json),
+[replay results](verification/traefik-buffering/strict-replay.json).
+The longest response with replay enabled was 3.7294 s. The new passes do not
+explain the older Envoy run's 37 unexpected 503s, recorded below.
+
+## Historical Envoy chart: fresh-cluster runs
+
+The original notes disagreed on the minimum replicas for these runs (four
+in the heading, six after a rollback). Their exact replica configuration
+cannot be confirmed from the old notes. The new Buffering runs above have
+an explicit configuration and retained logs.
+
 
 `make down && make cluster && make setup`, then 3 full `make check` runs per
 environment, alternating, 2026-11-23 22:18-23:25. Setup from the repo alone
@@ -47,7 +100,7 @@ below 1,586 MiB (load average up to 36 during image builds), so these runs
 show no memory pressure. The cause of the first production run 1 failure is
 still open; it did not repeat in 3 runs.
 
-Totals on the final chart since the fresh cluster: development 3 of 3,
+Totals for these historical Envoy runs: development 3 of 3,
 production 4 of 6 (one run lost to a closed lid, one unexplained).
 
 An earlier fresh-cluster attempt with minReplicas 4 (target 8) failed level 3
@@ -67,9 +120,9 @@ one run each:
 | 8 | PASS, 0 of 7008 | 12 |
 | 10 | FAIL, 1 of 2186 (503 × 1) during the ramp | |
 
-Target 8 held where it had failed behind Traefik alone (248 × 503): Envoy
-sends each request to the pod with the fewest in flight, so pods stay near
-the average instead of the busiest one hitting 20.
+Target 8 passed with Envoy in these runs. The new Buffering results above
+also pass without Envoy at a six-pod minimum. These were different
+configurations, not a controlled load-balancer comparison.
 
 minReplicas against level 4 alone, target 8, development:
 
@@ -80,7 +133,8 @@ minReplicas against level 4 alone, target 8, development:
 | 5 | PASS, 0 of 586 |
 | 6 | PASS, 0 of 908 |
 
-Chosen: target 8, minReplicas 4 (the cheapest that passed both).
+Four replicas passed the standalone level-4 test. Later fresh-cluster
+level-3 failures led back to six replicas, as recorded above.
 
 ## Cluster load (add-ons)
 
@@ -130,7 +184,7 @@ successes (`envoy_cluster_upstream_rq_retry` / `_retry_success`).
 | 3 | KEDA, target 8 in flight, max 15 | PASS once (0 of 7006, peak 14 pods), then FAIL 248 of 2000 (503 × 248) | scale-up lags 20-30 s; busiest pod hit 20 while the average was 12 |
 | 3 | target 5, max 20 | PASS, 0 of 7007, peak 20 pods | |
 | 4 | no retry | FAIL, 1 of 40 (502 × 1) | request in flight on the killed pod |
-| 4 | + Traefik retry middleware | FAIL, 1-2 × 502 per run | access logs: every 502 was in flight on the killed pod, RetryAttempts 0. Traefik 2.11 never resends a written request |
+| 4 | + Traefik retry middleware | FAIL, 1-2 × 502 per run | access logs: every 502 was in flight on the killed pod, RetryAttempts 0. Traefik 2.11's ordinary Retry middleware never resends a written request |
 | 4 | + Traefik ServersTransport, keep-alive off (reverted) | FAIL, 3 × 502 | wrong theory, made it worse |
 | 4 | + Envoy gateway, minReplicas 3 | FAIL, 4 of 95 (503 × 4) | retries worked (10/10), but 2 surviving pods hit the 20 limit |
 | 4 | + minReplicas 6 | PASS | |
