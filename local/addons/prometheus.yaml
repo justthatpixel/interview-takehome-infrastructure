@@ -1,5 +1,5 @@
-# Prometheus only to feed the autoscaler (and show Envoy's retries): scrapes
-# pods that have prometheus.io/* annotations, nothing else.
+# Prometheus feeds the autoscaler: scrape only pods with prometheus.io/*
+# annotations.
 server:
   global:
     # The autoscaler can only react as fast as the data. The default 1m would
