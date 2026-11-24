@@ -10,8 +10,8 @@ autoscaling:
   # The latest 60 req/s tests peaked at 12-13; 20 leaves scaling headroom.
   # Database connection limits remain a separate constraint; see README.
   maxReplicas: 20
-  # Each pod rejects its 21st request. Aim below that limit because new pods
-  # take 20-30 s to become useful. Passed both environments with Buffering.
+  # Each pod rejects its 21st request. Aim well below that limit because new
+  # pods take 20-30 s to become useful, and round-robin load is uneven.
   targetInFlight: 8
   prometheusAddress: http://prometheus-server.monitoring.svc
 
@@ -27,8 +27,8 @@ api:
   logLevel: info
   # Time allowed for active requests to finish after SIGTERM.
   shutdownTimeoutSeconds: 10
-  # Keep serving while Traefik learns that the pod is terminating. The 15 s
-  # margin is retained from the tested chart; observed propagation was 1.8 s.
+  # Keep serving while Traefik learns that the pod is terminating. Traefik
+  # took about 1.8 s to notice; 15 s leaves a wide margin on a busy cluster.
   preStopSleepSeconds: 15
 
 postgres:

@@ -22,8 +22,8 @@ cluster:
 	terraform -chdir=local/terraform init -input=false
 	terraform -chdir=local/terraform apply -input=false -auto-approve -var kube_context=$(CONTEXT)
 
-# Prepare the cluster for the chart (DB password Secrets in the app
-# namespaces). Run once after `make cluster`.
+# Prepare the cluster for the chart: DB password Secrets in the app namespaces,
+# plus Prometheus and KEDA for autoscaling. Run once after `make cluster`.
 setup:
 	CONTEXT=$(CONTEXT) local/setup.sh
 

@@ -105,7 +105,7 @@ quarantines the supplied grader, remove that flag with
 | 2. The Level 1 race on each evicted pod (502) | The same shutdown handling as Level 1. An eviction is just a normal pod shutdown. |
 | 3. Replacements stuck in Pending | Zone spread with `nodeTaintsPolicy: Honor`. Cordoned nodes are left out of the spread calculation, so replacements can go onto the one remaining worker. |
 | 4. Less capacity while replacements start | `minReplicas: 6` (two per zone). Losing one pod at a time still leaves plenty, and the PDB makes sure only one is ever missing. |
-| 5. Pods don't move back after uncordon | Not solved. It doesn't cause failures. In production, the Kubernetes descheduler would rebalance them (see Limits below). |
+| 5. Pods don't move back after uncordon | Not solved. It doesn't cause failures. In production, the Kubernetes descheduler would rebalance them. |
 
 ## Level 3: load goes up
 
@@ -151,8 +151,8 @@ quarantines the supplied grader, remove that flag with
 
 | Failure point | How we solved it |
 | --- | --- |
-| 1. In-flight requests die with the process (502) | Traefik's buffering middleware with `retryExpression: IsNetworkError() && Attempts() < 3`. Traefik keeps a copy of each request, so when the pod dies mid-request it replays the same `GET` on another pod. It's safe because `GET /proxy` only reads data. |
-| 2. New requests sent to the dead pod (502) | The same middleware. A refused connection is a network error, so it's replayed on another pod. |
+| 1. In-flight requests die with the process (502) | Traefik's buffering middleware with `retryExpression: IsNetworkError() && Attempts() < 3`. Traefik keeps a copy of each request, so when the pod dies mid-request it replays the same `GET`, usually on another pod (Traefik's round-robin picks the next one). It's safe because `GET /proxy` only reads data. |
+| 2. New requests sent to the dead pod (502) | The same middleware. A refused connection is a network error, so it's replayed, usually on another pod. |
 | 3. Remaining pods overloaded (503) | `minReplicas: 6`. Losing one of 6 leaves 5, well under their limit at 20 req/s. With 3 pods, the two survivors went over 20 and returned 503s. |
 | 4. Restarted container gets traffic too early | The startup and readiness probes run again after every restart, so the pod only rejoins once the new process is serving. |
 | 5. CrashLoopBackOff keeps a pod out longer | Headroom from `minReplicas: 6`. The other pods cover it for as long as it's out. |
