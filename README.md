@@ -4,7 +4,7 @@
 
 A Helm chart in [`deploy/api`](deploy/api) that keeps the proxy API answering
 through redeployments, node drains, load changes and sudden container
-crashes. On 2026-11-24, all four grader levels passed once in each
+crashes. All four grader levels passed once in each
 environment with zero failed requests. Traefik routes straight to the API
 pods and replays interrupted requests; KEDA scales the pods on requests in
 flight.
