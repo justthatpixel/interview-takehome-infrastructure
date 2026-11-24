@@ -165,6 +165,19 @@ pods, their services, config and PDB were removed. A stricter test counted
 all requests during crashes: replay disabled produced seven 502s out of 50;
 replay enabled produced zero failures out of 150 across three kills.
 
+## Results
+
+One full `make check` per environment on 2026-11-24. Each cell shows failed
+requests out of the total sent:
+
+| Environment | Level 1 | Level 2 | Level 3 | Level 4 | Peak API pods |
+|---|---|---|---|---|---|
+| development | 0 of 566 | 0 of 611 | 0 of 7006 | 0 of 523 | 12 |
+| production | 0 of 596 | 0 of 597 | 0 of 7006 | 0 of 530 | 13 |
+
+These runs were on an existing cluster. They were not fresh-cluster or long
+soak runs. Logs and older runs are in [`docs/results.md`](docs/results.md).
+
 ## What I'd do differently in production
 
 1. **Protect the database from too many connections.** Each API pod can open
@@ -179,3 +192,12 @@ replay enabled produced zero failures out of 150 across three kills.
    password into each namespace. In production I'd deploy with Argo CD and
    have External Secrets pull the password from Scaleway Secret Manager, so
    no one handles it directly.
+
+## Use of AI
+
+I used AI (Claude Code) to get all four levels passing first. That version
+put an Envoy proxy between Traefik and the API pods to retry interrupted
+requests. It worked, but Envoy added an extra hop to every request and three
+more pods per environment to run and maintain. That wasn't worth it for one
+feature. So I optimised it: Traefik's own buffering middleware does the same
+retries, and with it the chart passed all four levels without Envoy.
