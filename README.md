@@ -1,20 +1,42 @@
 # Proxy API: Helm chart
 
-A Helm chart in [`deploy/api`](deploy/api) for redeployments, node drains,
-load changes and sudden container crashes. Traefik handles request replay;
-there is no separate gateway deployment.
+![Architecture](docs/images/architecture.png)
 
-```
-client -> Traefik -> API pods (6-20, autoscaled) -> Postgres
-           retries      |
-                        +-> metrics -> Prometheus -> KEDA/HPA
-```
+A Helm chart in [`deploy/api`](deploy/api) that keeps the proxy API answering
+through redeployments, node drains, load changes and sudden container
+crashes. On 2026-11-24, all four grader levels passed once in each
+environment with zero failed requests. Traefik routes straight to the API
+pods and replays interrupted requests; KEDA scales the pods on requests in
+flight.
 
-On 2026-11-24, all four grader levels passed once in each environment with
-zero failed requests. A separate test also recovered requests already
-running on containers when they were killed. Exact settings, logs and older
-results are in [`docs/results.md`](docs/results.md). The task brief is in
+Exact settings, logs and older results are in
+[`docs/results.md`](docs/results.md). The task brief is in
 [`docs/task.md`](docs/task.md).
+
+## Repository structure
+
+```
+.
+├── Makefile                  # make cluster / setup / check
+├── deploy/api/               # The Helm chart (the deliverable)
+│   ├── values.yaml           # Shared defaults, with why each value is set
+│   ├── development.yaml      # Host and DB user per environment
+│   ├── production.yaml
+│   └── templates/
+│       ├── deployment.yaml   # Probes, preStop, rolling update, zone spread
+│       ├── service.yaml
+│       ├── ingress.yaml      # Traefik route for GET /proxy
+│       ├── retry.yaml        # Traefik buffering middleware (level 4)
+│       ├── pdb.yaml          # PodDisruptionBudget (level 2)
+│       ├── scaledobject.yaml # KEDA autoscaling on requests in flight (level 3)
+│       └── configmap.yaml    # The API's config.yaml
+├── local/                    # Local cluster: k3d, Postgres (Terraform), Traefik pin
+│   ├── setup.sh              # make setup: Secret copy, Prometheus, KEDA
+│   └── addons/               # Pinned Prometheus and KEDA values
+├── services/api/             # The API (unchanged)
+├── bin/                      # The grader (unchanged)
+└── docs/                     # Results, verification logs, task brief, images
+```
 
 ## Run it
 
@@ -41,6 +63,8 @@ quarantines the supplied grader, remove that flag with
 
 ### Scenario
 
+![Level 1: Helm upgrade](docs/images/level-1-helm-upgrade.png)
+
 - We update the API image with a `helm upgrade`, which triggers a rolling update.
 - Startup sequence: the container starts, the health server comes up on 9090, the API pings Postgres until it answers, then it opens port 8080.
 - Without probes, Kubernetes treats a pod as ready as soon as its container starts, so Traefik sends traffic to pods that are still booting.
@@ -63,6 +87,8 @@ quarantines the supplied grader, remove that flag with
 
 ### Scenario
 
+![Level 2: Two nodes drained](docs/images/level-2-node-drain.png)
+
 - Draining is what we'd do for node maintenance: cordon the node (no new pods), then evict every pod on it.
 - The grader drains the two workers with the most API pods at the same time, leaving one worker. Traefik and Postgres run on the control plane, so only the API pods are hit.
 - By default nothing limits evictions. With 3 pods, 2 are evicted at once and the last pod gets all the traffic. Each pod handles 20 requests at once, so it overflows (503).
@@ -84,6 +110,10 @@ quarantines the supplied grader, remove that flag with
 ## Level 3: load goes up
 
 ### Scenario
+
+![Level 3: The load goes up](docs/images/level-3-load-spike.png)
+
+The image shows one extra pod per zone for simplicity. The measured peak was 12-13 pods.
 
 - The grader raises the load from 14 to 60 req/s over 1 minute, holds 60 req/s for 1 minute, then drops back to 14 req/s over 30s. The number of pods must go up.
 - Each request takes 0.2–3s (about 1.6s on average), so 60 req/s means about 96 requests in flight. Each pod handles 20 at once, so we need at least 5 pods with zero headroom.
@@ -108,6 +138,8 @@ quarantines the supplied grader, remove that flag with
 ## Level 4: pods crash
 
 ### Scenario
+
+![Level 4: Containers crash](docs/images/level-4-pod-crash.png)
 
 - The grader kills an API container with no warning (SIGKILL), 3 times, at 20 req/s. This simulates a real crash, for example OOMKilled.
 - The pod stays in place. Only the container inside it dies, and Kubernetes restarts it in the same pod.
@@ -134,19 +166,6 @@ passed the same four levels with the same autoscaling settings, so those
 pods, their services, config and PDB were removed. A stricter test counted
 all requests during crashes: replay disabled produced seven 502s out of 50;
 replay enabled produced zero failures out of 150 across three kills.
-
-## Chart files
-
-| File | Purpose |
-|---|---|
-| `values.yaml` | Shared settings and sizing |
-| `development.yaml`, `production.yaml` | Environment host and DB user |
-| `templates/deployment.yaml` | Lifecycle, probes, rollout and zone spread |
-| `templates/configmap.yaml` | API configuration |
-| `templates/service.yaml`, `ingress.yaml` | Direct Traefik-to-API routing |
-| `templates/retry.yaml` | Buffering middleware and replay expression |
-| `templates/pdb.yaml` | Voluntary disruption budget |
-| `templates/scaledobject.yaml` | In-flight autoscaling |
 
 ## Limits and production changes
 
