@@ -1,156 +1,254 @@
-# Proxy API - Infrastructure Take-Home Test
+# Proxy API: Helm chart
 
-> [!WARNING]
-> This repo holds three take-home tests, each on its own branch: `backend`,
-> `full-stack` and `infrastructure`. Before you start, ask your contact at
-> Byteful which test to do.
+A Helm chart in [`deploy/api`](deploy/api) that keeps the proxy API answering
+every request while it is redeployed, while its nodes are drained, while load
+triples, and while its containers are killed. All four `make check` levels
+pass on both environments with zero failed requests.
 
-The API is a core part of **Byteful**. Our customers use it all day, every
-day, to get their list of proxies and to create proxy users. They need every
-request to succeed, whatever we deploy and whatever happens to our
-infrastructure. So we must take care with how we run it.
+The task brief is kept in [`docs/task.md`](docs/task.md). Every number below
+comes from real runs, recorded in [`docs/results.md`](docs/results.md).
 
-## Your goal
-
-Write a **Helm chart** for the API in `services/api`. The API must stay
-available while you deploy it, while Kubernetes moves its pods, and while the
-load goes up and down.
-
-1. Write the chart in `deploy/api`.
-2. Run `make check` until you pass level 1. Then change your chart to pass
-   each next level.
-3. Write a short README. Explain your work, what you would change for a real
-   production cluster, and anything else you want to tell us.
-
-Spend no more than **3 hours**. We prefer a well thought out answer to a
-rushed one written by AI.
-
-Submit a GitHub repository, public or private, with your chart and your
-README. A short video that explains your solution is a bonus. Good luck!
-
----
-
-## Set up
-
-We want this take-home to be fun, so we give you a local k3d cluster to work
-in. We tested it on Linux. If it does not run on your machine, contact us and
-we will give you a development environment.
-
-The local cluster is as close to our production cluster as we could make it.
-It uses Traefik as the ingress controller, like ours. In production we deploy
-with Argo CD, but Argo CD is hard to run locally, so `make check` runs the
-Helm upgrades for you.
-
-You can install other tools that your solution needs in the cluster, for
-example Prometheus. You can run them on the control-plane node.
-
-### Prerequisites
-
-| Tool | Install guide |
-|---|---|
-| Docker | [Get Docker](https://docs.docker.com/get-started/get-docker/) |
-| k3d | [Install k3d](https://k3d.io/stable/#installation) |
-| kubectl | [Install kubectl](https://kubernetes.io/docs/tasks/tools/#kubectl) |
-| Helm | [Install Helm](https://helm.sh/docs/intro/install/) |
-| Terraform | [Install Terraform](https://developer.hashicorp.com/terraform/install) |
-| make | Your package manager, for example `apt install make` or `xcode-select --install` |
-
-### Your local cluster
-
-```bash
-make cluster      # k3d cluster with Traefik on localhost:8081, a registry and Postgres
-make check        # deploy your chart under load, then run the levels
-make down         # delete the cluster
+```
+client ─▶ Traefik ─▶ Envoy gateway (3 pods) ─▶ API pods (6-20, autoscaled)
+          (Ingress)    retries GET /proxy        │
+                       on another pod            ├─▶ Postgres
+                                                 └─▶ Prometheus ◀─ KEDA (HPA)
 ```
 
-If port `8081` is in use, run `make cluster TRAEFIK_PORT=18081`.
+## How to run it
 
-The cluster has a control-plane node, which your API pods cannot run on, and
-three workers in different zones:
+Prerequisites are in the task brief (Docker, k3d, kubectl, Helm, Terraform,
+make). On macOS the grader binary may be quarantined:
+`/usr/bin/xattr -d com.apple.quarantine bin/check-darwin-arm64`.
 
-| Node | Zone (`topology.kubernetes.io/zone`) |
+```bash
+make cluster                    # k3d cluster, registry, Postgres (unchanged)
+make setup                      # DB Secrets + Prometheus + KEDA (local/setup.sh)
+make check ENV=development
+make check ENV=production
+```
+
+`make setup` is idempotent. It copies each environment's DB password Secret
+from the `db` namespace into `development` and `production`, then installs
+pinned versions of Prometheus and KEDA on the control-plane node, so a drain
+of the workers never stops autoscaling. `VALUES` in the `Makefile` defaults to
+`deploy/api/$(ENV).yaml`.
+
+Keep the machine awake during `make check`. One of my runs failed because the
+laptop lid closed and froze the Docker VM.
+
+## The chart
+
+| File | What it is |
 |---|---|
-| `k3d-takehome-agent-0` | `ams-1` |
-| `k3d-takehome-agent-1` | `par-1` |
-| `k3d-takehome-agent-2` | `lon-1` |
+| `values.yaml` | Shared defaults, with a comment on why each value is what it is |
+| `development.yaml`, `production.yaml` | Host and DB user per environment |
+| `templates/deployment.yaml` | The API: probes, preStop, rolling update, zone spread |
+| `templates/configmap.yaml` | `/root/configs/config.yaml` (the API exits without it) |
+| `templates/service.yaml`, `ingress.yaml` | Service, and `GET /proxy` on the environment host |
+| `templates/pdb.yaml` | PodDisruptionBudget for the API |
+| `templates/scaledobject.yaml` | KEDA autoscaling on requests in flight |
+| `templates/retry.yaml` | Traefik retry Middleware |
+| `templates/gateway-*.yaml` | Envoy gateway: config, Deployment, Services, PDB |
 
-Postgres is already running in the cluster:
+The YAML comments say why each setting is there. This README says which
+failure it fixed.
 
-| Setting | `development` | `production` |
+## Level by level
+
+### Level 1: deploy under load
+
+**Failure without it.** The API closes port 8080 the moment it gets SIGTERM.
+Traefik only learns the pod is going away a moment later, and sends requests
+to the closed port in between (the brief's example: `502 × 16`).
+
+**Fix.**
+- `preStop` sleep (15 s) before SIGTERM, so whatever routes to the pod has
+  dropped it before the port closes. 10 s was enough for Traefik alone; the
+  gateway finds pods by DNS, which can lag about 6 s, hence 15.
+- `terminationGracePeriodSeconds` = preStop + `shutdownTimeout` (10 s) + 10 s
+  buffer, computed in the template, so the kubelet never SIGKILLs a drain.
+- Probes on the health port 9090: startup `/db` (Postgres answered and 8080
+  is open, allowing 60 s), readiness `/status` (503 after SIGTERM), liveness
+  `/ping`. Liveness deliberately does not check Postgres, or a DB outage would
+  restart every pod at once.
+- `maxUnavailable: 0`, `maxSurge: 1`: an old pod goes only after its
+  replacement is Ready.
+- A config checksum annotation rolls pods when the config changes.
+
+**Result.** 0 of 386 failed on the first run.
+
+### Level 2: two nodes drained at once
+
+**Failure.** `503 × 4`. Both drained nodes' pods were evicted together, and the
+single pod left hit the API's 20-request limit.
+
+**Fix.**
+- PodDisruptionBudget, `maxUnavailable: 1`. The drain evicts one pod, waits
+  for its replacement to be Ready, then the next. `maxUnavailable` rather than
+  `minAvailable`, so it stays right as the autoscaler changes the count.
+- `topologySpreadConstraints` on zone, `maxSkew: 1`, `DoNotSchedule`, with
+  `nodeTaintsPolicy: Honor`. Without `Honor`, cordoned nodes still count
+  toward the skew, and the replacements for a drain can sit in Pending.
+
+**Result.** 0 of 385 failed.
+
+### Level 3: load from 14 to 60 req/s
+
+**Failure.** `503 × 2` at about 29 req/s: three pods cannot hold it. CPU stays
+near zero because a request is mostly a sleep, so CPU-based autoscaling is
+useless here.
+
+**Fix.** Scale on `http_requests_in_flight`, which the API already exports.
+- Prometheus scrapes the pods every 5 s (pod annotations). KEDA's
+  `ScaledObject` turns the query
+  `sum(http_requests_in_flight{namespace, app})` into an HPA that targets an
+  average of **8 in flight per pod**, between **6 and 20 pods**.
+- HPA `behavior`: scale up by up to 100% every 15 s with no stabilisation;
+  scale down by 2 pods per 30 s after a 60 s window. Down is deliberately slow,
+  so a short dip does not remove capacity, and every removal is a pod
+  shutdown that must drain cleanly.
+- The Deployment has no `replicas` field, so a `helm upgrade` never resets
+  the count the autoscaler chose.
+
+**How the target was chosen.** A scale-up takes 20-30 s to land (scrape, HPA
+sync, pod start). Behind Traefik's round-robin, target 8 failed badly on a
+rerun (`503 × 248`): the busiest pod hit 20 while the average was 12, so I
+dropped to 5. With the Envoy gateway (below), which sends each request to the
+pod with the fewest in flight, I measured again:
+
+| Target | Level 3 | Peak pods |
 |---|---|---|
-| Host | `postgres.db.svc.cluster.local` | `postgres.db.svc.cluster.local` |
-| Port | `5432` | `5432` |
-| User | `api_development` | `api_production` |
-| Database | `ping_residential` | `ping_residential` |
-| Password | Secret `db/development-postgres-password` | Secret `db/production-postgres-password` |
+| 5 | pass | 20 (the ceiling) |
+| 6 | pass | 17 |
+| 8 | pass | 12 |
+| 10 | fail, `503 × 1` | |
 
-In our clusters, the External Secrets Operator creates these Secrets from
-Scaleway Secret Manager. Locally they are in the `db` namespace, with the
-password in the `password` key. You can change their names, keys and
-namespaces.
+8 is the highest that passes, and it leaves headroom under `maxReplicas`.
 
-### Check your work
+**Result.** 0 of 7,007 failed, peak 12-13 pods.
 
-`make check` stops at the first level that fails. Level 1 deploys a new
-image of your chart while requests run. At least one pod must be replaced,
-and no request may fail. When you pass a level, the check tells you what the
-next level does.
+### Level 4: containers killed with SIGKILL
 
-```
-level 1: deploy under load
-  Deploys a new image of your chart while requests run. At least one pod must be replaced, and no request may fail.
-  FAIL  16 of 133 failed (502 × 16)
-```
+**Failure.** `502 × 1-2` per run. A killed container gets no preStop and no
+drain, so every request it was working on fails.
 
-Use `ENV=production` to check the other environment.
+**What did not work, and why.** I added a Traefik retry Middleware first. It
+did not help. Traefik's access logs showed every 502 had `RetryAttempts: 0`
+and was a request already in flight on the killed pod: all of them ended at
+the same instant, the kill. Traefik 2.11 stops retrying once it has written a
+request to the backend, so it cannot save these. I also tried turning off
+Traefik's keep-alive to the pods, on the theory that requests were being
+written onto dead connections. It made things worse (`502 × 3`) and I
+reverted it.
 
-You do not need to install the chart yourself. `make check` builds a new
-image and runs:
+**Fix: an Envoy gateway** (`gateway.enabled`, on by default) between Traefik
+and the API:
+- Envoy finds the API pods through a headless Service, so it can tell them
+  apart. A normal Service would hide them behind one IP.
+- `GET /proxy` is retried on `reset`, `connect-failure` and `refused-stream`,
+  up to 2 times, on a **different** pod (`previous_hosts`). It is safe because
+  the request only reads. It never retries a 5xx: the API answers 503 when
+  full, and retrying that would hide overload and add to it.
+- A retry budget caps retries at 20% of requests in flight (at least 25, so
+  one full pod of 20 can always be retried). Envoy's default allows only 3
+  retries at once for the whole cluster.
+- Outlier detection ejects a pod after one connection failure (it is dead)
+  but never for 503s (it is busy). Ejecting busy pods under load would push
+  their load onto the rest.
+- `LEAST_REQUEST` load balancing, which is also why target 8 now works.
+- 3 pods, zone-spread, with their own PDB and a 20 s preStop, since Envoy
+  exits straight away on SIGTERM.
+- The admin API is bound to `127.0.0.1`. A separate port (9902) answers only
+  `/healthz` (probes) and `/stats/prometheus`, and returns 404 for anything
+  else, including `/quitquitquit`.
+- The Traefik retry Middleware stays (3 attempts, 50 ms): it covers a
+  *gateway* pod dying, where Traefik's connection is refused.
 
-```bash
-helm upgrade --install proxy-api deploy/api \
-  --namespace <environment> --create-namespace \
-  --values <your values files> \
-  --set image.repository=localhost:5001/proxy-api \
-  --set image.tag=<new tag> \
-  --wait --timeout 5m
-```
+**Second failure, then `minReplicas`.** With the gateway, level 4 failed
+`503 × 4` instead. Retries worked (10 of 10 succeeded), but with 3 pods a kill
+left 2 to carry about 32 requests plus the retries, and one hit 20. With 6
+pods (two per zone), losing a pod or a whole zone still leaves 4. I tried 4:
+it passed level 4 but failed level 3 on a fresh cluster, because the ramp
+starts from `minReplicas`. So 6.
 
-Name and arrange your values files as you like. Tell `make check` which files
-to use with `VALUES`, comma-separated and in order. For example:
+**Result.** 0 failed in every level 4 run since (507 to 2,339 requests each).
 
-```bash
-make check VALUES=deploy/api/production.yaml ENV=production
-```
+## Results
 
-You can also set `VALUES` in the `Makefile`. If `VALUES` is empty, Helm uses
-only the chart's `values.yaml`.
+From a fresh cluster (`make down && make cluster && make setup`), final
+chart:
 
-Your chart must follow these rules:
+| | Full `make check` runs | Passed |
+|---|---|---|
+| development | 3 | 3 |
+| production, first 3 | 3 | 1 |
+| production, rerun with the Mac kept awake | 3 | 3 |
 
-| Setting | Value |
-|---|---|
-| Chart path | `deploy/api` |
-| Release name | `proxy-api` |
-| Namespace | `development` or `production` |
-| Route | `GET /proxy` on the host `development.localhost` or `production.localhost` |
-| Image | Read from `image.repository` and `image.tag` |
-| Pod label | `app.kubernetes.io/name: proxy-api` on the API pods |
+Of the two production failures, one was the laptop lid closing mid-run (the
+power log shows the sleep; the grader's clock showed 2 minutes for a
+38-minute run). The other (`503 × 37` during the 60 req/s hold) is **not
+explained**: the API had already scaled to 13 pods, then the grader's own
+throughput dipped and requests failed together, which looks like the whole
+cluster stalling rather than too few pods. It did not repeat in the next
+three runs. Details in [`docs/results.md`](docs/results.md).
 
-`make check` installs only your chart. Set up everything else before you run
-it.
+## Trade-offs and known limits
 
----
+- **The gateway is an extra component and an extra hop.** It is the most
+  complex part of the chart, and a retried request takes up to about twice as
+  long. I added it only after showing Traefik could not do the job.
+- **DB connections.** pgxpool's default maximum is `max(4, CPUs)` per pod: 12
+  on these nodes. Both environments at `maxReplicas` would be 40 pods and up
+  to 480 connections, against Postgres's 100. In practice a pod holds one or
+  two, because it uses a connection only for one short query. The pool size
+  cannot be set without changing the app.
+- **Pods do not rebalance after a drain.** After level 2 all pods can end up
+  on one node; spread only applies when pods are scheduled.
+- **Autoscaling depends on Prometheus.** If it is down, the HPA keeps the
+  current count but cannot scale up. There is no KEDA `fallback` yet.
+- **Idle cost.** `minReplicas: 6` keeps six API pods and three gateway pods
+  running at any load. That is the price of surviving a kill at baseline
+  traffic.
+- **Runs as root.** The image's working directory is `/root`, and I did not
+  add a `securityContext`.
+- **The add-ons are trimmed for a laptop.** Prometheus scrapes only annotated
+  pods with 2 h retention. Its default jobs pulled about 90,000 samples every
+  5 s through the k3s API server, and pushed the control-plane node to about
+  320% CPU (the grader's container kill timed out once). After trimming:
+  about 16% CPU, 116 MiB instead of 771 MiB.
 
-## The API
+## What I would change for production
 
-The API is in `services/api`. Its ports, endpoints, metrics and config are in
-[`services/api/README.md`](services/api/README.md).
+- **Retries in the ingress instead of a separate gateway.** An ingress or mesh
+  that can retry idempotent requests after they were sent (Envoy Gateway,
+  Istio, or a newer ingress controller) would remove the extra hop.
+- **Argo CD** to deploy the chart, as Byteful already does.
+- **External Secrets Operator** with Scaleway Secret Manager for the DB
+  password, instead of `local/setup.sh` copying Secrets.
+- **PgBouncer, or a configurable pool size** in the API, to bound DB
+  connections properly.
+- **Sizing from load tests.** Requests and limits here are small guesses
+  (50m / 64Mi, 128Mi limit), and `minReplicas` and the in-flight target should
+  come from real traffic.
+- **Alerts** on the 5xx rate, Envoy retry rate, container restarts, and
+  in-flight per pod close to 20.
+- **NetworkPolicies:** API 8080 reachable only from the gateway, the gateway
+  only from Traefik, egress only to Postgres and DNS.
+- **Hardening:** non-root (needs a Dockerfile change away from `/root`), a
+  read-only root filesystem, dropped capabilities, and images pinned by
+  digest.
+- **More than one Traefik replica.** Here it is a single pod on the control
+  plane, as provided.
+- **A managed, highly available database** instead of one Postgres pod.
+- **The descheduler**, to rebalance pods across zones after a drain.
+- **A KEDA `fallback`**, so a Prometheus outage holds a safe replica count.
 
----
+## Time spent
 
-## Use of AI
-
-We are an AI first company. We love AI, but we hate slop. You can use AI
-tools. You must still be able to explain every line as if you wrote it
-yourself.
+The chart for levels 1-3 took about 25 minutes. Level 4 took most of the
+time: about an hour to find out why Traefik's retries did nothing and to build
+the gateway. Tuning, trimming the add-ons and verification took about an hour
+more. The fresh-cluster and repeated runs then ran over several hours,
+mostly unattended. That is beyond the 3-hour budget; the extra went on making
+level 4 correct and proving the result is repeatable.
