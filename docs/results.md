@@ -3,7 +3,84 @@
 Real numbers from `make check` runs on the local k3d cluster (Docker Desktop,
 Apple Silicon). Newest first within each section.
 
-## Current chart (Envoy gateway on, minReplicas 6)
+## Fresh cluster, current chart (target 8, minReplicas 4, slim Prometheus)
+
+`make down && make cluster && make setup`, then 3 full `make check` runs per
+environment, alternating, 2026-11-23 22:18-23:25. Setup from the repo alone
+worked first time.
+
+| Run | development | production |
+|---|---|---|
+| 1 | PASS all 4 (L3 peak 12 pods, L4 0 of 878) | FAIL level 3: 37 of 5361 (503 × 37) |
+| 2 | PASS all 4 (L3 peak 12, L4 0 of 2339) | PASS all 4 (L3 peak 13, L4 0 of 766) |
+| 3 | PASS all 4 (L3 peak 12, L4 0 of 507) | FAIL level 2: 11 of 433 (503 × 11) |
+
+Levels 1 and 2 passed in every run except production run 3.
+
+**Production run 3: the laptop slept.** `pmset -g log` shows "Clamshell
+Sleep" (lid closed) at 22:48:20, during level 2, until about 23:25. The
+grader's clock shows under 2 minutes for a run that took 38 minutes of wall
+time. The Docker VM froze with it. Not a chart failure, but not a pass.
+
+**Production run 1: not explained yet.** No sleep in the power log. At
+60 req/s the API had already scaled to 13 pods and run 50 s with no
+failures; then the grader's own throughput fell (about 190 requests in a 5 s
+window instead of about 300) and 32 requests failed at once. The production
+gateways' counters (covering all three production runs, the sleep included)
+show 34 `per_try_timeout` (a pod took over 5 s, which a healthy pod never
+does: requests take at most 3 s), 48 upstream 503s and 31 ejections. That
+points to the whole cluster stalling rather than too few pods, possibly
+memory pressure in the 7.6 GiB Docker VM (it had 150-470 MiB free at times).
+Not proven.
+
+An earlier fresh-cluster attempt with minReplicas 4 (target 8) failed level 3
+on both environments (development 503 × 1, production 503 × 4); minReplicas
+went back to 6.
+
+## Autoscaling tuning (B2)
+
+Level 3 was peaking at exactly maxReplicas (20) with target 5, so the
+ceiling was the limit. Runs on development, minReplicas 6, maxReplicas 20,
+one run each:
+
+| Target in flight | Level 3 | Peak pods |
+|---|---|---|
+| 5 (before) | PASS, 0 of 7008 | 20 (= max) |
+| 6 | PASS, 0 of 7005 | 17 |
+| 8 | PASS, 0 of 7008 | 12 |
+| 10 | FAIL, 1 of 2186 (503 × 1) during the ramp | |
+
+Target 8 held where it had failed behind Traefik alone (248 × 503): Envoy
+sends each request to the pod with the fewest in flight, so pods stay near
+the average instead of the busiest one hitting 20.
+
+minReplicas against level 4 alone, target 8, development:
+
+| minReplicas | Level 4 |
+|---|---|
+| 3 (target 5, before) | FAIL, 4 of 95 (503 × 4) |
+| 4 | PASS, 0 of 1061 |
+| 5 | PASS, 0 of 586 |
+| 6 | PASS, 0 of 908 |
+
+Chosen: target 8, minReplicas 4 (the cheapest that passed both).
+
+## Cluster load (add-ons)
+
+The server node hit about 250-320% CPU (`docker stats`) and the grader's
+kill timed out once. Cause: Prometheus's default scrape jobs pulled about
+90,000 samples every 5 s through the k3s API server (`kubernetes-nodes`
+48.6k, `kubernetes-api-servers` 41.2k, cAdvisor 8.1k), none of them used.
+
+| | Before | After (pods job only, 2 h retention) |
+|---|---|---|
+| Server node CPU (`docker stats`, idle) | ~320% | ~16% |
+| Prometheus memory | 771Mi | 116Mi |
+| Prometheus CPU | 149m | 32m |
+| Series in memory | 194,053 | 8,421 |
+| Envoy series per gateway pod | ~1,050 | 342 (`usedonly`) |
+
+## Earlier chart (Envoy gateway on, target 5, minReplicas 6)
 
 Full `make check`, one run per environment, 2026-11-23:
 
@@ -47,8 +124,3 @@ successes (`envoy_cluster_upstream_rq_retry` / `_retry_success`).
 - SIGKILL to Traefik dropping the pod from its backends: about 1.8 s
   (Traefik's provider throttle, default 2 s).
 
-## Not yet done
-
-- Repeated runs (5× per environment) to show it is reliable, not lucky.
-- Fresh-cluster test (`make down && make cluster && make setup`, then both
-  checks).
