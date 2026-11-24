@@ -157,13 +157,7 @@ quarantines the supplied grader, remove that flag with
 | 4. Restarted container gets traffic too early | The startup and readiness probes run again after every restart, so the pod only rejoins once the new process is serving. |
 | 5. CrashLoopBackOff keeps a pod out longer | Headroom from `minReplicas: 6`. The other pods cover it for as long as it's out. |
 
-The middleware only retries network errors (502/504). A 503 from a pod at its 20-request limit is passed straight through, so real overload is never hidden.
 
-An earlier implementation used three Envoy pods per environment. Buffering
-passed the same four levels with the same autoscaling settings, so those
-pods, their services, config and PDB were removed. A stricter test counted
-all requests during crashes: replay disabled produced seven 502s out of 50;
-replay enabled produced zero failures out of 150 across three kills.
 
 ## Results
 
@@ -175,8 +169,17 @@ requests out of the total sent:
 | development | 0 of 566 | 0 of 611 | 0 of 7006 | 0 of 523 | 12 |
 | production | 0 of 596 | 0 of 597 | 0 of 7006 | 0 of 530 | 13 |
 
-These runs were on an existing cluster. They were not fresh-cluster or long
-soak runs. Logs and older runs are in [`docs/results.md`](docs/results.md).
+
+## Use of AI
+
+- I used AI (Claude Code) to get to a working solution first, with all 4 levels passing.
+- For level 4, we initially added an Envoy proxy between Traefik and the pods. It gave us a retry mechanism that could resend requests already in flight on a pod that crashed, which Traefik's plain retry middleware couldn't do.
+- I then realised the additional hop was unnecessary, as it added latency and another component to run.
+- So I removed the Envoy proxy and used Traefik's buffering middleware instead, which retries the same failed requests without the extra hop.
+
+
+
+
 
 ## What I'd do differently in production
 
@@ -193,11 +196,3 @@ soak runs. Logs and older runs are in [`docs/results.md`](docs/results.md).
    have External Secrets pull the password from Scaleway Secret Manager, so
    no one handles it directly.
 
-## Use of AI
-
-I used AI (Claude Code) to get all four levels passing first. That version
-put an Envoy proxy between Traefik and the API pods to retry interrupted
-requests. It worked, but Envoy added an extra hop to every request and three
-more pods per environment to run and maintain. That wasn't worth it for one
-feature. So I optimised it: Traefik's own buffering middleware does the same
-retries, and with it the chart passed all four levels without Envoy.
